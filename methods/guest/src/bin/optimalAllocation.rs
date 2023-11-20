@@ -2,7 +2,9 @@
 
 use std::io::Read;
 
-use ethabi::{ethereum_types::U256, ethereum_types::I256, ParamType, Token};
+use ethabi::{ethereum_types::U256, ParamType, Token, Address};
+use ethers_core::types::I256;
+
 use risc0_zkvm::guest::env;
 
 risc0_zkvm::guest::entry!(main);
@@ -26,11 +28,11 @@ struct StrategyDataParams {
     rate_half_life: U256,
     vertex_rate_percent: U256,
     rate_prec: U256,
-    is_interest_paused: U256
+    is_interest_paused: bool
 }
 
 struct Position {
-    strategy: ParamType::Address,
+    strategy: Address,
     debt: U256,
 }
 
@@ -41,46 +43,44 @@ struct StrategyParams {
     max_debt: U256
 }
 
-const SECONDS_PER_YEAR: U256 = 31556952;
+const SECONDS_PER_YEAR: u128 = 31556952 as u128;
 
-fn get_full_utilization_interest(delta_time: U256, utilization: U256, full_utilization_interest: u64) -> u64 {
+fn get_full_utilization_interest(delta_time: U256, utilization: U256, strategy_data: StrategyDataParams) -> u64 {
     let mut new_full_utilization_interest: u64;
 
-    if utilization < min_target_util {
-        let delta_utilization = ((min_target_util - utilization) * 1e18) / min_target_util;
-        let decay_growth = (rate_half_life * 1e36) + (delta_utilization * delta_utilization * delta_time);
+    if utilization < strategy_data.min_target_util {
+        let delta_utilization = ((strategy_data.min_target_util - utilization) * U256::from(1e18 as u128)) / strategy_data.min_target_util;
+        let decay_growth = (strategy_data.rate_half_life * U256::from(1e36 as u128)) + (delta_utilization * delta_utilization * delta_time);
         new_full_utilization_interest =
-            ((full_utilization_interest * (rate_half_life * 1e36)) / decay_growth) as u64;
-    } else if utilization > max_target_util {
-        let delta_utilization = ((utilization - max_target_util) * 1e18) / (util_prec - max_target_util);
-        let decay_growth = (rate_half_life * 1e36) + (delta_utilization * delta_utilization * delta_time);
+            ((strategy_data.full_utilization_rate * (strategy_data.rate_half_life * U256::from(1e36 as u128))) / decay_growth).as_u64();
+    } else if utilization > strategy_data.max_target_util {
+        let delta_utilization = ((utilization - strategy_data.max_target_util) * U256::from(1e18 as u128)) / (strategy_data.util_prec - strategy_data.max_target_util);
+        let decay_growth = (strategy_data.rate_half_life * U256::from(1e36 as u128)) + (delta_utilization * delta_utilization * delta_time);
         new_full_utilization_interest =
-            ((full_utilization_interest * decay_growth) / (rate_half_life * 1e36)) as u64;
+            ((strategy_data.full_utilization_rate * decay_growth) / (strategy_data.rate_half_life * U256::from(1e36 as u128))).as_u64();
     } else {
-        new_full_utilization_interest = full_utilization_interest;
+        new_full_utilization_interest = strategy_data.full_utilization_rate.as_u64();
     }
 
-    if new_full_utilization_interest > max_full_util_rate {
-        new_full_utilization_interest = max_full_util_rate;
-    } else if new_full_utilization_interest < min_full_util_rate {
-        new_full_utilization_interest = min_full_util_rate;
+    if new_full_utilization_interest > strategy_data.max_full_util_rate.as_u64() {
+        new_full_utilization_interest = strategy_data.max_full_util_rate.as_u64();
+    } else if new_full_utilization_interest < strategy_data.min_full_util_rate.as_u64() {
+        new_full_utilization_interest = strategy_data.min_full_util_rate.as_u64();
     }
 
     new_full_utilization_interest
 }
 
-fn get_new_rate(delta_time: U256, utilization: U256, old_full_utilization_interest: u64) -> (u64, u64) {
-    let new_full_utilization_interest = get_full_utilization_interest(delta_time, utilization, old_full_utilization_interest);
+fn get_new_rate(delta_time: U256, utilization: U256, strategy_data: StrategyDataParams) -> (u64, u64) {
+    let new_full_utilization_interest = get_full_utilization_interest(delta_time, utilization, strategy_data);
 
     let vertex_interest =
-        (((new_full_utilization_interest - zero_util_rate) * vertex_rate_percent) / rate_prec) + zero_util_rate;
+        (((U256::from(new_full_utilization_interest) - strategy_data.zero_util_rate) * strategy_data.vertex_rate_percent) / strategy_data.rate_prec) + strategy_data.zero_util_rate;
 
-    let new_rate_per_sec = if utilization < vertex_utilization {
-        (zero_util_rate + (utilization * (vertex_interest - zero_util_rate)) / vertex_utilization) as u64
+    let new_rate_per_sec = if utilization < strategy_data.vertex_utilization {
+        (strategy_data.zero_util_rate + (utilization * (vertex_interest - strategy_data.zero_util_rate)) / strategy_data.vertex_utilization).as_u64()
     } else {
-        let slope =
-            ((new_full_utilization_interest - vertex_interest) * util_prec) / (util_prec - vertex_utilization);
-        (vertex_interest + ((utilization - vertex_utilization) * slope) / util_prec) as u64
+        (vertex_interest + ((utilization - strategy_data.vertex_utilization) * (U256::from(new_full_utilization_interest) - vertex_interest)) / (strategy_data.util_prec - strategy_data.vertex_utilization)).as_u64()
     };
 
     (new_rate_per_sec, new_full_utilization_interest)
@@ -90,35 +90,36 @@ fn apr_after_debt_change(
     strategy_data: StrategyDataParams,
     delta: I256
 ) -> U256 {
-    if delta == 0 {
-        return strategy_data.rate_per_sec * SECONDS_PER_YEAR;
+    if delta == I256::from(0 as i128) {
+        return strategy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR);
     }
 
-    let asset_amount = U256::from(I256::from(strategy_data.total_asset) + delta);
+    let asset_amount = U256::from((I256::from(strategy_data.total_asset.as_u128() as i128) + delta).as_i128() as u128);
 
     if strategy_data.is_interest_paused {
-        return strategy_data.rate_per_sec * SECONDS_PER_YEAR;
+        return strategy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR);
     }
 
     let delta_time = strategy_data.cur_timestamp - strategy_data.last_timestamp;
     let utilization_rate;
-    if asset_amount == 0 {
-        utilization_rate = 0;
+    if asset_amount == U256::from(0 as u128) {
+        utilization_rate = U256::from(0 as u128);
     } else {
         utilization_rate = (strategy_data.util_prec * strategy_data.total_borrow) / asset_amount
     };
 
-    let (strategy_data.rate_per_sec, _) = get_new_rate(
+    let (rate_per_sec, _) = get_new_rate(
         delta_time,
         utilization_rate,
-        strategy_data.full_utilization_rate,
+        strategy_data,
     );
+    strategy_data.rate_per_sec = U256::from(rate_per_sec);
 
-    strategy_data.rate_per_sec * SECONDS_PER_YEAR
+    strategy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR)
 }
 
 fn get_optimal_allocation(
-    c: U256,
+    c: u64,
     total_initial_amount: U256,
     total_available_amount: U256,
     initial_datas: Vec<Position>,
@@ -127,7 +128,7 @@ fn get_optimal_allocation(
 ) -> Vec<Position> {
     let mut b = initial_datas.clone();
     let deposit_unit = (total_available_amount - total_initial_amount) / c;
-    let strategy_count = initial_datas.length;
+    let strategy_count = initial_datas.len();
 
     // Iterate chunk count
     for i in 0..c {
@@ -137,7 +138,7 @@ fn get_optimal_allocation(
         }
 
         // Find max apr silo when deposit unit amount
-        let mut max_apr = 0.0;
+        let mut max_apr = 0;
         let mut max_index = 0;
 
         for j in 0..strategy_count {
@@ -146,7 +147,7 @@ fn get_optimal_allocation(
                 continue;
             }
 
-            let apr = apr_after_debt_change(strategy_datas[j], b[j] + deposit_unit - sturdy_datas[j].current_debt);
+            let apr = apr_after_debt_change(strategy_datas[j], b[j] + deposit_unit - sturdy_datas[j].current_debt).as_u64();
 
             if max_apr >= apr {
                 continue;
@@ -156,7 +157,7 @@ fn get_optimal_allocation(
             max_index = j;
         }
 
-        if max_apr == 0.0 {
+        if max_apr == 0 {
             println!("There is no max apr");
         }
 
@@ -197,9 +198,9 @@ fn main() {
             ParamType::Uint(256),      // chunk count
             ParamType::Uint(256),      // total initial amount
             ParamType::Uint(256),      // total available amount
-            ParamType::Array(Vec<Position>)                 // initial datas
-            ParamType::Array(Vec<StrategyDataParams>)       // strategy datas
-            ParamType::Array(Vec<StrategyParams>)       // sturdy datas
+            ParamType::Array(Position),                 // initial datas
+            ParamType::Array(StrategyDataParams),       // strategy datas
+            ParamType::Array(StrategyParams),       // sturdy datas
         ],
         &input_bytes,
     )
@@ -209,12 +210,12 @@ fn main() {
     let total_initial_amount: U256 = input[1].clone().into_uint().unwrap();
     let total_available_amount: U256 = input[2].clone().into_uint().unwrap();
 
-    let initial_datas: Vec<Position> = input[3].clone().into_array().unwrap().as_u128();
-    let strategy_datas: Vec<StrategyDataParams> = input[4].clone().into_array().unwrap().as_u128();
-    let sturdy_datas: Vec<StrategyParams> = input[5].clone().into_array().unwrap().as_u32();
+    let initial_datas: Vec::<Position> = input[3].clone().into_array().unwrap().as_tuple();
+    let strategy_datas: Vec::<StrategyDataParams> = input[4].clone().into_array().unwrap().as_tuple();
+    let sturdy_datas: Vec::<StrategyParams> = input[5].clone().into_array().unwrap().as_tuple();
 
-    let result: Vec<Position> = get_optimal_allocation(
-        chunk_count, 
+    let result: Vec::<Position> = get_optimal_allocation(
+        chunk_count.as_u64(), 
         total_initial_amount, 
         total_available_amount, 
         initial_datas, 
