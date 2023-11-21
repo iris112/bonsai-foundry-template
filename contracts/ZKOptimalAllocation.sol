@@ -34,8 +34,6 @@ contract ZKOptimalAllocation is Ownable {
 
     struct SturdyStrategyDataParams {
         uint256 curTimestamp;
-        uint256 version;
-        uint256 lastBlock;
         uint256 lastTimestamp;
         uint256 ratePerSec;
         uint256 fullUtilizationRate;
@@ -96,7 +94,7 @@ contract ZKOptimalAllocation is Ownable {
         SturdyStrategyDataParams memory data
     ) internal view returns (SturdyStrategyDataParams memory) {
         (
-            data.lastBlock,
+            ,
             ,
             data.lastTimestamp,
             data.ratePerSec,
