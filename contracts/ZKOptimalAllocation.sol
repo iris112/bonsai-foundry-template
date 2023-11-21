@@ -3,9 +3,9 @@ pragma solidity 0.8.21;
 
 import {Ownable} from "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {IFraxLendStrategy} from "./interfaces/IFraxLendStrategy.sol";
-import {IFraxLend} from "./interfaces/FraxLend/IFraxLend.sol";
-import {IFraxLendV2} from "./interfaces/FraxLend/IFraxLendV2.sol";
-import {IFraxLendV3} from "./interfaces/FraxLend/IFraxLendV3.sol";
+import {IFraxLend} from "./interfaces/IFraxLend.sol";
+import {IFraxLendV2} from "./interfaces/IFraxLendV2.sol";
+import {IFraxLendV3} from "./interfaces/IFraxLendV3.sol";
 import {IDebtManager} from "./interfaces/IDebtManager.sol";
 import {IVault} from "./interfaces/IVault.sol";
 
