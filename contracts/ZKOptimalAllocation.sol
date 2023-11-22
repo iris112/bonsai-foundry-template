@@ -8,6 +8,8 @@ import {IFraxLendV2} from "./interfaces/IFraxLendV2.sol";
 import {IFraxLendV3} from "./interfaces/IFraxLendV3.sol";
 import {IDebtManager} from "./interfaces/IDebtManager.sol";
 import {IVault} from "./interfaces/IVault.sol";
+import {IBonsaiRelay} from "bonsai/IBonsaiRelay.sol";
+import {BonsaiCallbackReceiver} from "bonsai/BonsaiCallbackReceiver.sol";
 
 interface ISturdyStrategyRate {
     function MIN_TARGET_UTIL() external view returns (uint256);
@@ -29,7 +31,7 @@ interface ISturdyStrategyRate {
     function RATE_PREC() external view returns (uint256);
 }
 
-contract ZKOptimalAllocation is Ownable {
+contract ZKOptimalAllocation is Ownable, BonsaiCallbackReceiver {
     error AG_INVALID_CONFIGURATION();
 
     struct SturdyStrategyDataParams {
@@ -52,6 +54,24 @@ contract ZKOptimalAllocation is Ownable {
         bool isInterestPaused;
     }
 
+    /// @notice Image ID of the only zkVM binary to accept callbacks from.
+    bytes32 public immutable fibImageId;
+
+    /// @notice Gas limit set on the callback from Bonsai.
+    /// @dev Should be set to the maximum amount of gas your callback might reasonably consume.
+    uint64 private constant BONSAI_CALLBACK_GAS_LIMIT = 100000;
+
+
+    IDebtManager.StrategyAllocation[] private _allocationDatas;
+    uint256 private _newAPR;
+    uint256 private _curAPR;
+    bool private _isSuccess;
+
+    /// @notice Initialize the contract, binding it to a specified Bonsai relay and RISC Zero guest image.
+    constructor(IBonsaiRelay bonsaiRelay, bytes32 _fibImageId) BonsaiCallbackReceiver(bonsaiRelay) {
+        fibImageId = _fibImageId;
+    }
+
     function startOptimalAllocation(
         IVault vault,
         uint256 chunkCount,
@@ -59,20 +79,59 @@ contract ZKOptimalAllocation is Ownable {
         IDebtManager.StrategyAllocation[] calldata initialDatas
     ) external {
         uint256 strategyCount = initialDatas.length;
-        if (strategyCount == 0) {
-            revert AG_INVALID_CONFIGURATION();
-        }
-
         IVault.StrategyParams[] memory strategyDatas = new IVault.StrategyParams[](strategyCount);
         SturdyStrategyDataParams[] memory sturdyDatas = new SturdyStrategyDataParams[](strategyCount);
-        for (uint256 i; i < strategyCount; ++i) {
-            strategyDatas[i] = vault.strategies(initialDatas[i].strategy);
-            sturdyDatas[i] = _getSturdyStrategyData(initialDatas[i].strategy);
+        uint256 totalAvailable;
+
+        if (address(vault) != address(0)) {
+            for (uint256 i; i < strategyCount; ++i) {
+                strategyDatas[i] = vault.strategies(initialDatas[i].strategy);
+                sturdyDatas[i] = _getSturdyStrategyData(initialDatas[i].strategy);
+            }
+            totalAvailable = vault.totalAssets() - vault.minimum_total_idle();
         }
 
-        uint256 totalAvailable = vault.totalAssets() - vault.minimum_total_idle();
+        bonsaiRelay.requestCallback(
+            fibImageId, 
+            abi.encode(
+                chunkCount,
+                totalInitialAmount,
+                totalAvailable,
+                initialDatas,
+                strategyDatas,
+                sturdyDatas
+            ),
+            address(this), 
+            this.onResult.selector, 
+            BONSAI_CALLBACK_GAS_LIMIT
+        );
+    }
 
-        // deliver data: chunkCount, totalInitialAmount, initialDatas, strategyDatas, sturdyDatas, totalAvailable
+    /// @notice Callback function logic for processing verified journals from Bonsai.
+    function onResult(
+        IDebtManager.StrategyAllocation[] calldata allocationDatas, 
+        uint256 newAPR,
+        uint256 curAPR,
+        bool isSuccess
+    ) external onlyBonsaiCallback(fibImageId) {
+        uint256 length = allocationDatas.length;
+        for (uint256 i; i < length; ++i) {
+            _allocationDatas.push(allocationDatas[i]);
+        }
+        _newAPR = newAPR;
+        _curAPR = curAPR;
+        _isSuccess = isSuccess;
+
+        // isSuccess = true then, Perform allocation via debt manager
+    }
+
+    function getResult() external view returns (IDebtManager.StrategyAllocation[] memory, uint256, uint256, bool) {
+        return (
+            _allocationDatas,
+            _newAPR,
+            _curAPR,
+            _isSuccess
+        );
     }
 
     function _getSturdyStrategyData(
