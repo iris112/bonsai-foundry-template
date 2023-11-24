@@ -59,7 +59,7 @@ contract ZKOptimalAllocation is Ownable, BonsaiCallbackReceiver {
 
     /// @notice Gas limit set on the callback from Bonsai.
     /// @dev Should be set to the maximum amount of gas your callback might reasonably consume.
-    uint64 private constant BONSAI_CALLBACK_GAS_LIMIT = 100000;
+    uint64 private constant BONSAI_CALLBACK_GAS_LIMIT = 1000000;
 
 
     IDebtManager.StrategyAllocation[] private _allocationDatas;

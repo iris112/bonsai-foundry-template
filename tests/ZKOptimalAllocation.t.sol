@@ -25,7 +25,7 @@ import {IVault} from "../contracts/interfaces/IVault.sol";
 contract ZKOptimalAllocationTest is BonsaiTest {
     string MAINNET_RPC_URL = vm.envString("MAINNET_RPC_URL");
 
-    function setUp() public withRelay {
+    function setUp() public {
         uint256 mainnetFork = vm.createSelectFork(MAINNET_RPC_URL);
         vm.rollFork(18_386_071);
 
@@ -34,7 +34,7 @@ contract ZKOptimalAllocationTest is BonsaiTest {
     }
 
     // Test the ZKOptimalAllocation contract by mocking an off-chain callback request
-    function testOffChainMock() public {
+    function testOffChainMock() public withRelay {
         bytes32 imageId = queryImageId("OPTIMAL_ALLOCATION");
         // Deploy a new starter instance
         ZKOptimalAllocation starter = new ZKOptimalAllocation(
@@ -45,13 +45,13 @@ contract ZKOptimalAllocationTest is BonsaiTest {
         // Anticipate a callback invocation on the starter contract
         vm.expectCall(address(starter), abi.encodeWithSelector(ZKOptimalAllocation.onResult.selector));
         // Relay the solution as a callback using simulated data
-        uint64 BONSAI_CALLBACK_GAS_LIMIT = 100000;
+        uint64 BONSAI_CALLBACK_GAS_LIMIT = 1000000;
         uint256 chunkCount = 100;
         uint256 totalInitialAmount;
         uint256 totalAvailable = 14000 * 10 ** 18;
         IDebtManager.StrategyAllocation[] memory initialDatas = new IDebtManager.StrategyAllocation[](4);
         for (uint256 i; i < 4; ++i) {
-            initialDatas[0].strategy = address(uint160(i + 1));
+            initialDatas[i].strategy = address(uint160(i + 1));
         }
         IVault.StrategyParams[] memory strategyDatas = new IVault.StrategyParams[](4);
         strategyDatas[0] = IVault.StrategyParams(
@@ -192,7 +192,7 @@ contract ZKOptimalAllocationTest is BonsaiTest {
     }
 
     // Test the ZKOptimalAllocation contract by mocking an on-chain callback request
-    function testOnChainMock() public {
+    function testOnChainMock() public withRelay {
         // Deploy a new starter instance
         ZKOptimalAllocation starter = new ZKOptimalAllocation(
             IBonsaiRelay(bonsaiRelay),
