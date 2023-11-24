@@ -91,11 +91,11 @@ fn apr_after_debt_change(
     delta: I256
 ) -> U256 {
     if delta == I256::try_from(0).unwrap() {
-        return sturdy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR) / U256::from(1e13);
+        return sturdy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR);
     }
 
     if sturdy_data.is_interest_paused {
-        return sturdy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR) / U256::from(1e13);
+        return sturdy_data.rate_per_sec * U256::from(SECONDS_PER_YEAR);
     }
 
     let asset_amount = U256::try_from(I256::try_from(sturdy_data.total_asset).unwrap() + delta).unwrap();
@@ -112,7 +112,7 @@ fn apr_after_debt_change(
         sturdy_data,
     );
 
-    U256::from(rate_per_sec) * U256::from(SECONDS_PER_YEAR) / U256::from(1e13)
+    U256::from(rate_per_sec) * U256::from(SECONDS_PER_YEAR)
 }
 
 fn get_optimal_allocation(
@@ -138,7 +138,7 @@ fn get_optimal_allocation(
         }
 
         // Find max apr silo when deposit unit amount
-        let mut max_apr = 0;
+        let mut max_apr = U256::from(0);
         let mut max_index = 0;
 
         for j in 0..strategy_count {
@@ -147,7 +147,7 @@ fn get_optimal_allocation(
                 continue;
             }
 
-            let apr = apr_after_debt_change(sturdy_datas[j], I256::try_from(b[j].debt + deposit_unit).unwrap() - I256::try_from(strategy_datas[j].current_debt).unwrap()).try_into().unwrap();
+            let apr = apr_after_debt_change(sturdy_datas[j], I256::try_from(b[j].debt + deposit_unit).unwrap() - I256::try_from(strategy_datas[j].current_debt).unwrap());
 
             if max_apr >= apr {
                 continue;
@@ -157,7 +157,7 @@ fn get_optimal_allocation(
             max_index = j;
         }
 
-        if max_apr == 0 {
+        if max_apr == U256::from(0) {
             panic!("There is no max apr");
         }
 

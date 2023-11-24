@@ -162,6 +162,8 @@ contract ZKOptimalAllocation is Ownable, BonsaiCallbackReceiver {
         (, , data.UTIL_PREC, , , , , ) = IFraxLendV3(pair).getConstants();
         data.isInterestPaused = IFraxLendV3(pair).isInterestPaused();
         data.curTimestamp = block.timestamp;
+        (data.totalAsset, ) = IFraxLend(pair).totalAsset();
+        (data.totalBorrow, ) = IFraxLend(pair).totalBorrow();
 
         return data;
     }
