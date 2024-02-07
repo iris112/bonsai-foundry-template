@@ -2,10 +2,8 @@
 pragma solidity 0.8.21;
 
 import {Ownable} from "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {IFraxLendStrategy} from "./interfaces/IFraxLendStrategy.sol";
-import {IFraxLend} from "./interfaces/IFraxLend.sol";
-import {IFraxLendV2} from "./interfaces/IFraxLendV2.sol";
-import {IFraxLendV3} from "./interfaces/IFraxLendV3.sol";
+import {ISturdySiloStrategy} from "./interfaces/ISturdySiloStrategy.sol";
+import {ISturdyPair} from "./interfaces/ISturdyPair.sol";
 import {IDebtManager} from "./interfaces/IDebtManager.sol";
 import {IVault} from "./interfaces/IVault.sol";
 import {IBonsaiRelay} from "bonsai/IBonsaiRelay.sol";
@@ -139,10 +137,10 @@ contract ZKOptimalAllocation is Ownable, BonsaiCallbackReceiver {
     ) internal view returns (SturdyStrategyDataParams memory) {
         SturdyStrategyDataParams memory result;
 
-        address pair = IFraxLendStrategy(strategy).pair();
+        address pair = ISturdySiloStrategy(strategy).pair();
         result = _getSturdyStrategyPairData(pair, result);
 
-        address rate = IFraxLend(pair).rateContract();
+        address rate = ISturdyPair(pair).rateContract();
         result = _getSturdyStrategyRateData(rate, result);
 
         return result;
@@ -158,12 +156,12 @@ contract ZKOptimalAllocation is Ownable, BonsaiCallbackReceiver {
             data.lastTimestamp,
             data.ratePerSec,
             data.fullUtilizationRate
-        ) = IFraxLendV2(pair).currentRateInfo();
-        (, , data.UTIL_PREC, , , , , ) = IFraxLendV3(pair).getConstants();
-        data.isInterestPaused = IFraxLendV3(pair).isInterestPaused();
+        ) = ISturdyPair(pair).currentRateInfo();
+        (, , data.UTIL_PREC, , , , , ) = ISturdyPair(pair).getConstants();
+        data.isInterestPaused = ISturdyPair(pair).isInterestPaused();
         data.curTimestamp = block.timestamp;
-        (data.totalAsset, ) = IFraxLend(pair).totalAsset();
-        (data.totalBorrow, ) = IFraxLend(pair).totalBorrow();
+        (data.totalAsset, ) = ISturdyPair(pair).totalAsset();
+        (data.totalBorrow, ) = ISturdyPair(pair).totalBorrow();
 
         return data;
     }

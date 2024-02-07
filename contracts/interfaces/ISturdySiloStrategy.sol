@@ -3,8 +3,6 @@ pragma solidity 0.8.21;
 
 import {IStrategy} from "./IStrategy.sol";
 
-interface IFraxLendStrategy is IStrategy {
+interface ISturdySiloStrategy is IStrategy {
     function pair() external view returns (address);
-    
-    function version() external view returns (uint256);
 }
