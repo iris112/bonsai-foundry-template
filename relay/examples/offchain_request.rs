@@ -14,13 +14,10 @@
 
 use std::env;
 
-use alloy_primitives::U256;
-use alloy_sol_types::SolValue;
 use anyhow::Context;
 use bonsai_ethereum_relay::sdk::client::{CallbackRequest, Client};
 use clap::Parser;
-use ethers::{abi::ethabi, types::{Address, I256}, utils::id};
-use ethabi::{ethereum_types::U256, Token};
+use ethers::{types::{Address}, utils::id};
 use methods::OPTIMAL_ALLOCATION_ID;
 use risc0_zkvm::sha::Digest;
 
@@ -34,12 +31,7 @@ struct Args {
     address: Address,
 
     /// Input
-    chunk_count: U256,
-    total_initial_amount: U256,
-    total_available_amount: U256,
-    initial_datas: Vec<Token>,
-    strategy_datas: Vec<Token>,
-    sturdy_datas: Vec<Token>,
+    abi_encoded_data: String,
 
     /// Bonsai Relay API URL.
     #[arg(long, env, default_value = "http://localhost:8080")]
@@ -71,17 +63,15 @@ async fn main() -> anyhow::Result<()> {
     .context("Failed to initialize the relay client")?;
 
     // Initialize the input for the OPTIMAL_ALLOCATION guest.
-    let input = ethabi::encode(&[
-        Token::Uint(args.chunk_count.into()),
-        Token::Uint(args.total_initial_amount.into()),
-        Token::Uint(args.total_available_amount.into()),
-        Token::Array(args.initial_datas.into()),
-        Token::Array(args.strategy_datas.into()),
-        Token::Array(args.sturdy_datas.into()),
-    ]);
+
+    let input = (0..args.abi_encoded_data.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&args.abi_encoded_data[i..i +  2],  16))
+        .collect::<Result<Vec<u8>, _>>()
+        .expect("Failed to convert hex string to Vec<u8>");
 
     // Set the function selector of the callback function.
-    let function_signature = "onResult(IDebtManager.StrategyAllocation[],uint256,uint256,bool)";
+    let function_signature = "onResult((address,uint256)[],uint256,uint256,bool)";
     let function_selector = id(function_signature);
 
     // Create a CallbackRequest for your contract
@@ -91,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         function_selector,
         gas_limit: 3000000,
         image_id: Digest::from(OPTIMAL_ALLOCATION_ID).into(),
-        input,
+        input
     };
 
     // Send the callback request to the Bonsai Relay.
